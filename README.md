@@ -1,4 +1,4 @@
-# Driver Nextor for Flashjacks
+# Driver Nextor for Flashjacks 1.9 (Nextor:2.1.1-beta1)
 
 Driver for the Flashjacks cartridge.
 With this driver loaded in the flashRom, you have access to the SD-Card driver and the Nextor and MSXDOS system.
