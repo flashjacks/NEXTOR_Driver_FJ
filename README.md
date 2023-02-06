@@ -1,5 +1,4 @@
-# NEXTOR_Driver_FJ
-Flashjacks Nextor Driver
+# Driver Nextor for Flashjacks
 
 Driver for the Flashjacks cartridge.
 With this driver loaded in the flashRom, you have access to the SD-Card drive and the Nextor and MSXDOS system.
