@@ -1,7 +1,7 @@
 # Driver Nextor for Flashjacks
 
 Driver for the Flashjacks cartridge.
-With this driver loaded in the flashRom, you have access to the SD-Card drive and the Nextor and MSXDOS system.
+With this driver loaded in the flashRom, you have access to the SD-Card driver and the Nextor and MSXDOS system.
 
 To compile:
 
@@ -16,3 +16,4 @@ mknexrom Nextor-2.1.1-beta1.base.dat FLASHIDE.ROM /d:FlashJacks_driver.bin /m:ch
 Sources:
 
 https://github.com/Konamiman/Nextor
+https://retromsx.com
