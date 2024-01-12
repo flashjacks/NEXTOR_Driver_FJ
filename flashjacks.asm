@@ -1,6 +1,6 @@
 	; Device-based driver for the FLASHJACKS SD interface for Nextor
 	;
-	; By Aquijacks v1.9
+	; By Aquijacks v2.2 2023
 	; Based on version 0.1 by Konamiman and 0.15 by Piter Punk
 
 	output	"FlashJacks_driver.bin"
@@ -23,8 +23,8 @@ DEBUG		equ	0	;Set to 1 for debugging, 0 to normal operation
 
 ;Driver version
 
-VER_MAIN	equ	1
-VER_SEC		equ	9
+VER_MAIN	equ	2
+VER_SEC		equ	2
 VER_REV		equ	0
 
 ;This is a very barebones driver. It has important limitations:
@@ -96,6 +96,11 @@ SRST	equ	2	;Software reset
 
 M_SRST	equ	(1 SHL SRST)
 
+; Routine to Bypass the HB-F1, HB-F1II and HB-F9P/S Firmware
+
+H_STKE	equ	0FEDAh
+RDSLT	equ	0000Ch		; Read a byte in a slot
+WRSLT	equ	00014h		; Write a byte in a slot
 
 ;-----------------------------------------------------------------------------
 ;
@@ -423,8 +428,8 @@ DRV_INIT:
 	;--- Comprueba el bit de doble reset y lo ejecuta en caso de estar en on.
 	call	IDE_ON
 	ld      a,(IDE_FLASHJACKS) ; Trae el registro de Flashjacks. 
-	and	11110100b ; Anula los bits de freq y deja solo la marca de comprobación y el bit de reset.
-	cp	0A4h ;	Comprueba marca de comprobaci�n y bit de reset
+	and	00000100b ; Anula los bits de freq mas segundo slot y deja solo los bits de marca de opciones.
+	cp	004h ;	Comprueba marca de bit de reset
 	jp	nz,CONTPRG ; No ha detectado una marca correcta del registro flashjacks por lo que no ejecuta nada del reset.
 	call	IDE_OFF
 	pop	hl ; Retorno de las variables de inicio.
@@ -708,13 +713,13 @@ ESPERA_FIN:
 	or	b
 	out	(0AAh),a
 	in	a,(0A9h)	
-	bit	1,a ;F5 -- Si es tecla pulsada VDP va a la rutina de permutaci�n de frecuencia.
-	jp	z,DEV_VDP_FIN ; Salta la gesti�n del VDP para la permutaci�n del VDP por tecla pulsada.
+	bit	1,a ;F5 -- Si es tecla pulsada VDP va a la rutina de permutación de frecuencia.
+	jp	z,DEV_VDP_FIN ; Salta la gestión del VDP para la permutación del VDP por tecla pulsada.
 	ld      a,(IDE_FLASHJACKS) ; Trae el registro de Flashjacks. 
-	and	11111011b ; Anula el bit de doble reset para comparar el resto.
-	cp	0A3h ;	Forzado a 60Hz. 101000 + Bit de Forzado a 1 + Bit de 60 Hz a 1
+	and	00000011b ; Deja pasar los bits de forzado mas frecuencia.
+	cp	003h ;	Forzado a 60Hz. Bit de Forzado a 1 + Bit de 60 Hz a 1
 	jp	z,DEV_FLASH60 ; Salta al forzado a 60 Hz.
-	cp	0A2h ;	Forzado a 50Hz. 101000 + Bit de Forzado a 1 + Bit de 50 Hz a 0
+	cp	002h ;	Forzado a 50Hz. Bit de Forzado a 1 + Bit de 50 Hz a 0
 	jp	z,DEV_FLASH50 ; Salta al forzado a 50 Hz.
 	jp	DEV_FLASH_FIN ; Otras opciones son ignoradas y no hace cambio alguno.
 
@@ -733,7 +738,7 @@ DEV_FLASHVDP:
 
 DEV_FLASH_FIN:
 	call	IDE_OFF
-	ret ; Devuelve el control.
+	jp	NO_FIRM_BOOT ; Salta a comprobación salto boot del firm de algunos MSX.
 
 DEV_VDP_FIN:
 	; Ejecuta la permutación del VDP existente
@@ -747,8 +752,144 @@ DEV_VDP_FIN:
 	ei
 	out	(099h),a
 	call	IDE_OFF
-	ret ; Devuelve el control.
+	jp	NO_FIRM_BOOT ; Salta a comprobación salto boot del firm de algunos MSX.
+
+NO_FIRM_BOOT:; Comprobación salto boot del firm de algunos MSX.
 	
+	call	IDE_ON
+	ld      a,(IDE_FLASHJACKS) ; Trae el registro de Flashjacks. 
+	and	00010000b ; Deja pasar la marca de salto boot firm MSX
+	cp	010h ;	Comprueba bit de salto boot firm MSX.
+	jp	nz,NULL_OTHER_SLOT ; No ha detectado una marca correcta del registro flashjacks por lo que no ejecuta nada salto boot firm MSX.
+	call	IDE_OFF
+
+	;---- Anulación del boot interno. Para seguir marcar un break en el Hook #FEDA.(Memory write watchpoint)
+	;---- Creado integramente por Aquijacks (Flashjacks) 16/12/2023.
+
+	;---- Verifica a través del hook que no es un Panasonic.
+	ld	a,(#FEFE)
+	cp	#87
+	jp	nz, No_Panasonic
+	
+	;Si es un Panasonic, Bypass FS-A1, FS-A1F y FS-A1mk2.
+	ld	a,#23
+	ld	(#CBD8),a	; Bypass FS-A1 firmware
+	ld	(#C3CE),a	; Bypass FS-A1F firmware
+	ld	(#C3D2),a	; Bypass FS-A1mk2 firmware
+	jp	NULL_OTHER_SLOT ; Fin de la pelicula. No hace falta mas.
+	 
+No_Panasonic:
+	;Verifica que no es Sony hb-55/75p continuando con el resto de modelos.
+	ld	a,0		; Slot 0
+	ld	hl,#8010	; Lectura de la ROM menu.
+	call	RDSLT
+	ei			; El RDSLT lleva un DI pero no un EI. Se lo ponemos.
+	cp	#F3		; dato a comparar
+	jp	nz, No_HB_75
+	ld	a,0		; Slot 0
+	ld	hl,#8011	; Lectura de la ROM menu.
+	call	RDSLT
+	ei			; El RDSLT lleva un DI pero no un EI. Se lo ponemos.
+	cp	#3E		; dato a comparar
+	jp	nz, No_HB_75	
+	jp	NULL_OTHER_SLOT	; Devuelve el control si es un HB-75p sin parchear ya que estos modelos detectan disk y desactivan menu.
+
+No_HB_75:
+	; Rutina que hace Bypass en ROM de los modelos HB-F9P/S, HB-F1, HB-101/201P, Mitsubishi G1 Series, Toshiba Series H, National FS-4000/4500 y otros con el mismo sistema.  
+	; Parchea la instrucción de la dirección F38Fh call #F398 a call #F460 (Memoria libre)
+	ld	a,060h
+	ld	(#F390),a
+	ld	a,0F4h
+	ld	(#F391),a
+
+	; En la memoria #F460 añade el código "Adding" de parcheo a ejecutar.
+	ld	hl,Adding
+	ld	de,#F460
+	ld	bc,7Fh ; Numero de bytes a copiar. No es exacto pero si sobrado para el código a insertar.
+	ldir
+	; Este es un contador que creamos para abortar tras x intentos de búsqueda del parcheo. Si hace llamada a la dirección 00XX a traves del salto F390 aborta y restaura su estado inicial.
+	ld	a, 30h    ; Número de intentos en hexadecimal.
+	ld	(#F4E0),a ; Una dirección de memoria libre cualquiera.
+
+	jp	NULL_OTHER_SLOT	 ; Devuelve el control. Y ya tendriamos parcheada la RAM con el programita. Ahora a esperar que caiga la CPU por este sitio.
+
+Adding:
+	; Solo al acceso al menú del firm hace el parcheo. En los demás accesos a las direcciones F390 salta a ix como si nada.
+	; En ix se encuentra la dirección de salto. Esa rutina no solo sirve para salto al menu del firm. Por lo que solo actuaremos en el salto a este. El resto somos invisibles.
+	push	af ; Almacena acumulador y flags ya que algunos modelos de MSX se ven sensibles en esta parte del código a mantener acumulador y flags.
+	ld	a,ixh
+	cp	#00
+	jr	z, Adding3 ;Si apunta a la memoria 00xxh descuenta en el contador de intentos fallidos y si es el último desparchea y fin.
+	ld	a,ixh
+	cp	#40
+	jr	nz, Adding2 ;Si no apunta a la memoria 40xxh salta.
+	ld	a,ixl
+	cp	#49 ; 4049h inicio dirección del HB-F1
+	jr	z, Adding4
+	cp	#10 ; 4010h inicio dirección del HB-F9s / Mitsubishi G1 / Toshiba Series H
+	jr	z, Adding4
+	cp	#43 ; 4043h inicio dirección del HB-201
+	jr	z, Adding4
+	cp	#4C ; 404Ch inicio dirección del HB-F1II
+	jr	z, Adding4
+	cp	#3B ; 403Bh inicio dirección del National FS-4500
+	jr	z, Adding4
+	cp	#1B ; 401Bh inicio dirección del National FS-4000
+	jr	z, Adding4
+Adding2:
+	pop	af   ; Devuelve af restaurando valores iniciales para resto de operaciones del MSX.
+	jp	(ix) ; Salta como si nada hubiera pasado a la espera del próximo intento.
+Adding3:
+	; Proceso de contaje decreciente y aborto tras x intentos para retirar parche por no encontrar modelo satisfactorio de MSX para parchear.
+	ld	a,(#F4E0) ; Recuperamos contador.
+	dec	a	  ; Resta 1 al contador.
+	ld	(#F4E0),a ; Almacenamos contador.
+	jr	nz, Adding2 ; Si no es cero hacemos otro ciclo completo.
+	
+	; Ejecuta otro parcheo en la dirección F38F para que quede como inicialmente un call #F398. Aquí no ha pasado nada. ;-)
+	ld	a,098h
+	ld	(#F390),a
+	ld	a,0F3h
+	ld	(#F391),a
+	pop	af   ; Devuelve af restaurando valores iniciales para resto de operaciones del MSX.
+	jp	(ix) ; Salta como si nada hubiera pasado ya que no procede parchear los philips y similares.
+Adding4:
+	; Ejecuta otro parcheo en la dirección F38F para que quede como inicialmente un call #F398. Aquí no ha pasado nada. ;-)
+	ld	a,098h
+	ld	(#F390),a
+	ld	a,0F3h
+	ld	(#F391),a
+	pop	af ; Devuelve af restaurando valores iniciales para resto de operaciones del MSX.
+	ret	; Hace el ret tan deseado dejando todo intacto. (Es el ret que devuelve la carga sin ejecutar la rom interna)	
+	ret	; Con el ret realizado se parchea de nuevo a su estado original para dejar intacto el código y salir limpios.
+	ret
+
+	;---- Fin de la anulación del Boot interno. Creado integramente por Aquijacks (Flashjacks)
+
+NULL_OTHER_SLOT:; Comprobación anular ejecución de otro cartucho en slot2 o superiores.
+	
+	call	IDE_ON
+	ld      a,(IDE_FLASHJACKS) ; Trae el registro de Flashjacks. 
+	and	00001000b ; Deja pasar la marca de anulación de slot 2.
+	cp	008h ;	Comprueba bit de anulación de slot2
+	jp	nz,NULL_OTHER_SLOT_EXIT ; No ha detectado una marca correcta del registro flashjacks por lo que no ejecuta nada del reset.
+	call	IDE_OFF
+	
+	;Ejecunta la anulación de ejecución en slots 2 y superiores.
+	ld a,#40
+        cp h
+        jp z, NULL_OTHER_SLOT_EXIT
+        ld IX,(0f674h)
+        ld (IX-6),0C3h
+        ld (IX-8),0EBh
+        ld (IX-12),2
+	jp NULL_OTHER_SLOT_EXIT ; Devuelve el control.
+
+NULL_OTHER_SLOT_EXIT:
+	call	IDE_OFF
+	ret ; Devuelve el control.
+
+
 ;--- Subroutines for the INIT procedure
 
 ; Chequea que pone FLASHJACKS en la dirección 457 en adelante del ID del driver SD.
@@ -1815,7 +1956,7 @@ INFO_S:
 	db	"FLASHJACKS SD driver v"
 	db	VER_MAIN+"0",".",VER_SEC+"0",".",VER_REV+"0",13,10
 	db	"(c) Konamiman  2009",13,10
-	db	"(c) Aquijacks  2019",13,10,13,10,0
+	db	"(c) Aquijacks  2023",13,10,13,10,0
 
 SEARCH_S:
 	db	"Buscando: ",0
